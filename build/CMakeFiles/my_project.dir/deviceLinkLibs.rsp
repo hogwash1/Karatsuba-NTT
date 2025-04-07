@@ -1,0 +1,1 @@
+ "/usr/local/lib/libntt-1.0.a"  -lcudadevrt -lcudart_static -lrt -lpthread -ldl 

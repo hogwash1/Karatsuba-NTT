@@ -1,0 +1,1 @@
+-isystem "/usr/local/include/GPUNTT-1.0" -isystem /usr/local/cuda/include

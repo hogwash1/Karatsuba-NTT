@@ -1,0 +1,3 @@
+/home/admin-txl/mydirectory1/my_ntt_project/build/CMakeFiles/my_project.dir
+/home/admin-txl/mydirectory1/my_ntt_project/build/CMakeFiles/edit_cache.dir
+/home/admin-txl/mydirectory1/my_ntt_project/build/CMakeFiles/rebuild_cache.dir
