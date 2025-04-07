@@ -13,7 +13,7 @@ int LOGN;   // NTT变换的log2长度（实际长度N=2^LOGN）
 int BATCH;  // 批量处理的多项式数量
 
 // 选择测试数据类型（64位版本）
-typedef Data64 TestDataType;  // 定义用于测试的数据类型（32/64位可切换）
+typedef Data32 TestDataType;  // 定义用于测试的数据类型（32/64位可切换）
 
 int main(int argc, char* argv[]) {
     // 初始化CUDA设备
@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
         LOGN = atoi(argv[1]);  // 第一个参数为LOGN
         BATCH = atoi(argv[2]); // 第二个参数为BATCH
     }
-    BATCH = 1;
+    BATCH = 2;
     cout << "LOGN = " << LOGN << ", BATCH = " << BATCH << endl;
 
     // 初始化NTT参数
@@ -56,6 +56,7 @@ int main(int argc, char* argv[]) {
     // 创建CPU端NTT生成器
     NTTCPU<TestDataType> generator(parameters);  // 用于生成参考结果的CPU实现
 
+    cout << "默认模数 = " << parameters.modulus.value << endl;
     // 初始化随机数生成器
     std::random_device rd;
     std::mt19937 gen(0);  // 固定种子用于结果可复现
@@ -77,6 +78,34 @@ int main(int argc, char* argv[]) {
         ntt_result[i] = generator.ntt(input1[i]);  // CPU NTT计算
         print_array(ntt_result[i].data(), "ntt_result[" + std::to_string(i) + "]");
     }
+
+    // 当Batch = 2， 计算ntt_result[0] * ntt_result[1]
+    if (BATCH == 2) {
+        vector<TestDataType> ntt_mult_result(parameters.n);
+        // for (int i = 0; i < parameters.n; i++) {
+        //     // ntt_mult_result[i] = OPERATOR<TestDataType>::mult(input1[0][i], input1[1][i], parameters.modulus);
+        //     unsigned long long ref = (unsigned long long)ntt_result[0][i] * ntt_result[1][i];
+        //     ntt_mult_result[i] = ref % parameters.modulus.value;
+        // }
+        ntt_mult_result = generator.mult(ntt_result[0], ntt_result[1]);
+        print_array(ntt_mult_result.data(), "ntt_mult_result");
+
+        // 执行CPU端乘法后INTT（生成参考结果）
+        vector<TestDataType> mult_result = generator.intt(ntt_mult_result);
+        print_array(mult_result.data(), "mult_result");
+
+        // 执行schoolbook乘法
+        vector<TestDataType> schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
+        input1[0], 
+        input1[1],
+        parameters.modulus,
+        parameters.poly_reduction  // 来自 NTTParameters
+        );
+        print_array(schoolbook_result.data(), "schoolbook_result");
+    }
+
+
+    
 
     // 执行CPU端INTT（生成参考结果）
     vector<vector<TestDataType>> intt_result(BATCH);
@@ -232,12 +261,22 @@ int main(int argc, char* argv[]) {
     }
     if (check) cout << "INTT结果正确" << endl;
 
+
+    // GPU内存分配与数据传输-----------------------------------------------
+    TestDataType* NTT_Mult_Result_GPU;  // GPU输入/输出数据指针
+    GPUNTT_CUDA_CHECK(  // 带错误检查的CUDA内存分配
+        cudaMalloc(&NTT_Mult_Result_GPU, parameters.n * sizeof(TestDataType)));
+    // 计算 NTT乘法结果 NTT_Mult_Result_GPU = &InOut_Datas * &(InOut_Datas + parameters.n)
+    
+
     // 资源释放-----------------------------------------------------------
     GPUNTT_CUDA_CHECK(cudaFree(InOut_Datas));
 
     GPUNTT_CUDA_CHECK(cudaFree(Forward_Omega_Table_Device));
     GPUNTT_CUDA_CHECK(cudaFree(Inverse_Omega_Table_Device));
     free(Output_Host);
+
+    GPUNTT_CUDA_CHECK(cudaFree(NTT_Mult_Result_GPU));
 
     return EXIT_SUCCESS;
 }

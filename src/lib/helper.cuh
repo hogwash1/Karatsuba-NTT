@@ -6,7 +6,7 @@
 // 打印函数
 template<typename T>
 void print_array(const T *data, const std::string &title) {
-    std::cout << "\n[" << title << "] 前5个元素: [";
+    std::cout << "\n[" << title << "]\n前5个元素: [";
     for (int i = 0; i < 5; ++i) {
         std::cout << data[i];
         if (i < 4) std::cout << ", ";
