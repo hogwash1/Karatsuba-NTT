@@ -292,6 +292,24 @@ int main(int argc, char* argv[]) {
                     parameters.n);
     if (check) cout << "点乘结果正确" << endl;
 
+    // INTT点乘结果验证
+    TestDataType* Mult_Result_GPU;      
+    GPUNTT_CUDA_CHECK(
+        cudaMalloc(&Mult_Result_GPU, BATCH * parameters.n * sizeof(TestDataType)));
+    // INTT( NTT_Mult_Result_GPU )
+    GPU_NTT(NTT_Mult_Result_GPU, Mult_Result_GPU, Inverse_Omega_Table_Device, test_modulus,
+            cfg_intt, 1, 1);
+
+    // Mult_Result_GPU 与 CPU 结果对比
+    GPUNTT_CUDA_CHECK(cudaMemcpy(mult_host_result, Mult_Result_GPU, 
+                        parameters.n * sizeof(TestDataType),
+                        cudaMemcpyDeviceToHost));
+    check = check_result(mult_host_result, 
+                    mult_result.data(),
+                    parameters.n);
+    print_array(mult_host_result, "GPU NTT乘法结果");
+    if (check) cout << "NTT乘法结果正确" << endl;
+
     // 资源释放-----------------------------------------------------------
     GPUNTT_CUDA_CHECK(cudaFree(InOut_Datas));
 
@@ -300,6 +318,8 @@ int main(int argc, char* argv[]) {
     free(Output_Host);
 
     GPUNTT_CUDA_CHECK(cudaFree(NTT_Mult_Result_GPU));
+    free(mult_host_result);
+    GPUNTT_CUDA_CHECK(cudaFree(Mult_Result_GPU));
 
     return EXIT_SUCCESS;
 }
