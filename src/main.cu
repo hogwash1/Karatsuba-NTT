@@ -80,29 +80,29 @@ int main(int argc, char* argv[]) {
     }
 
     // 当Batch = 2， 计算ntt_result[0] * ntt_result[1]
-    if (BATCH == 2) {
-        vector<TestDataType> ntt_mult_result(parameters.n);
-        // for (int i = 0; i < parameters.n; i++) {
-        //     // ntt_mult_result[i] = OPERATOR<TestDataType>::mult(input1[0][i], input1[1][i], parameters.modulus);
-        //     unsigned long long ref = (unsigned long long)ntt_result[0][i] * ntt_result[1][i];
-        //     ntt_mult_result[i] = ref % parameters.modulus.value;
-        // }
-        ntt_mult_result = generator.mult(ntt_result[0], ntt_result[1]);
-        print_array(ntt_mult_result.data(), "ntt_mult_result");
+    
+    vector<TestDataType> ntt_mult_result(parameters.n);
+    // for (int i = 0; i < parameters.n; i++) {
+    //     // ntt_mult_result[i] = OPERATOR<TestDataType>::mult(input1[0][i], input1[1][i], parameters.modulus);
+    //     unsigned long long ref = (unsigned long long)ntt_result[0][i] * ntt_result[1][i];
+    //     ntt_mult_result[i] = ref % parameters.modulus.value;
+    // }
+    ntt_mult_result = generator.mult(ntt_result[0], ntt_result[1]);
+    print_array(ntt_mult_result.data(), "ntt_mult_result");
 
-        // 执行CPU端乘法后INTT（生成参考结果）
-        vector<TestDataType> mult_result = generator.intt(ntt_mult_result);
-        print_array(mult_result.data(), "mult_result");
+    // 执行CPU端乘法后INTT（生成参考结果）
+    vector<TestDataType> mult_result = generator.intt(ntt_mult_result);
+    print_array(mult_result.data(), "mult_result");
 
-        // 执行schoolbook乘法
-        vector<TestDataType> schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
-        input1[0], 
-        input1[1],
-        parameters.modulus,
-        parameters.poly_reduction  // 来自 NTTParameters
-        );
-        print_array(schoolbook_result.data(), "schoolbook_result");
-    }
+    // 执行schoolbook乘法
+    vector<TestDataType> schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
+    input1[0], 
+    input1[1],
+    parameters.modulus,
+    parameters.poly_reduction  // 来自 NTTParameters
+    );
+    print_array(schoolbook_result.data(), "schoolbook_result");
+    
 
 
     
@@ -267,7 +267,30 @@ int main(int argc, char* argv[]) {
     GPUNTT_CUDA_CHECK(  // 带错误检查的CUDA内存分配
         cudaMalloc(&NTT_Mult_Result_GPU, parameters.n * sizeof(TestDataType)));
     // 计算 NTT乘法结果 NTT_Mult_Result_GPU = &InOut_Datas * &(InOut_Datas + parameters.n)
-    
+
+
+    // 在GPU NTT计算之后添加点乘调用
+    PointwiseMultiply<TestDataType>(
+        InOut_Datas,                      // 第一个多项式地址
+        InOut_Datas + parameters.n,       // 第二个多项式地址（BATCH=2时偏移）
+        NTT_Mult_Result_GPU,              // 输出地址
+        parameters.modulus,               // 模数参数
+        parameters.n,                     // 多项式长度
+        1,                                // 批量数
+        0                                 // 使用默认流
+    );
+
+    // 添加结果验证代码
+    TestDataType* mult_host_result = (TestDataType*)malloc(parameters.n * sizeof(TestDataType));
+    GPUNTT_CUDA_CHECK(cudaMemcpy(mult_host_result, NTT_Mult_Result_GPU, 
+                            parameters.n * sizeof(TestDataType),
+                            cudaMemcpyDeviceToHost));
+
+    // 与CPU结果对比
+    check = check_result(mult_host_result, 
+                    ntt_mult_result.data(),
+                    parameters.n);
+    if (check) cout << "点乘结果正确" << endl;
 
     // 资源释放-----------------------------------------------------------
     GPUNTT_CUDA_CHECK(cudaFree(InOut_Datas));
