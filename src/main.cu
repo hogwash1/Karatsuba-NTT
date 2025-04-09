@@ -64,20 +64,64 @@ int main(int argc, char* argv[]) {
     std::uniform_int_distribution<unsigned long long> dis(0, maxNumber);
 
     // 生成随机输入数据
-    vector<vector<TestDataType>> input1(BATCH);
+    vector<vector<TestDataType>> input1(BATCH), input2(BATCH);
     for (int j = 0; j < BATCH; j++) {
         for (int i = 0; i < parameters.n; i++) {  // parameters.n = 2^LOGN
             input1[j].push_back(dis(gen));  // 生成[0, modulus-1]范围内的随机数
+            input2[j].push_back(dis(gen));
         }
         print_array(input1[j].data(), "input1[" + std::to_string(j) + "]");
+        print_array(input2[j].data(), "input2[" + std::to_string(j) + "]");
     }
 
     // 执行CPU端NTT（生成参考结果）
-    vector<vector<TestDataType>> ntt_result(BATCH);
+    vector<vector<TestDataType>> ntt_result(BATCH), ntt_result2(BATCH);
     for (int i = 0; i < BATCH; i++) {
         ntt_result[i] = generator.ntt(input1[i]);  // CPU NTT计算
+        ntt_result2[i] = generator.ntt(input2[i]);
         print_array(ntt_result[i].data(), "ntt_result[" + std::to_string(i) + "]");
+        print_array(ntt_result2[i].data(), "ntt_result2[" + std::to_string(i) + "]");
     }
+
+    // 处理对角线项 diag_term[i] = ntt_result[i] * ntt_result2[i]
+    vector<vector<TestDataType>> diag_term(BATCH);
+    for(int i = 0; i < BATCH; i++)
+    {
+        diag_term[i].resize(parameters.n, 0);
+        diag_term[i] = generator.mult(ntt_result[i], ntt_result2[i]);
+    }
+
+    //  处理其它项 other_term[i] = ntt_result[i] * ntt_result2[i]
+    vector<vector<TestDataType>> other_term(2 * BATCH, vector<TestDataType>(parameters.n, 0));
+    for(int i = 0; i < BATCH; i++)
+    {
+        for(int j = i + 1; j < BATCH; j++)
+        {
+            // 计算fi*gj + fj*gi
+            // 使用 (fi + fj) * (gi + gj) - fi*gi - fj*gj 优化计算
+            vector<TestDataType> tmp1 = generator.add(ntt_result[i], ntt_result[j]);
+            vector<TestDataType> tmp2 = generator.add(ntt_result2[i], ntt_result2[j]);
+            vector<TestDataType> tmp3 = generator.mult(tmp1, tmp2);
+            tmp3 = generator.sub(tmp3, diag_term[i]);
+            tmp3 = generator.sub(tmp3, diag_term[j]);
+            other_term[i + j] = generator.add(other_term[i + j], tmp3);
+        }
+
+    }
+    // 对角线项加上其它项
+    for (int i = 0; i < BATCH; ++i)
+    {
+        other_term[2 * i] = generator.add(other_term[2 * i], diag_term[i]);
+    }
+    // 合并结果
+    vector<vector<TestDataType>> ntt_result_final(BATCH);
+    for(int i = 0; i < BATCH; ++i)
+    {
+        ntt_result_final[i].resize(parameters.n, 0);
+        ntt_result_final[i] = generator.add(other_term[i], other_term[i + BATCH]);
+        print_array(ntt_result_final[i].data(), "ntt_result_final[" + std::to_string(i) + "]");
+    }
+    
 
     // 当Batch = 2， 计算ntt_result[0] * ntt_result[1]
     
