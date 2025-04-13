@@ -3,7 +3,7 @@
 #include "ntt.cuh"    // GPU-NTT 库核心头文件
 #include "lib/helper.cuh"
 
-#define DEFAULT_MODULUS  // 启用默认模数模式
+// #define DEFAULT_MODULUS  // 启用默认模数模式
 
 using namespace std;
 using namespace gpuntt;  // 使用 GPU-NTT 库的命名空间
@@ -13,7 +13,7 @@ int LOGN;   // NTT变换的log2长度（实际长度N=2^LOGN）
 int BATCH;  // 批量处理的多项式数量
 
 // 选择测试数据类型（64位版本）
-typedef Data32 TestDataType;  // 定义用于测试的数据类型（32/64位可切换）
+typedef Data64 TestDataType;  // 定义用于测试的数据类型（32/64位可切换）
 
 int main(int argc, char* argv[]) {
     // 初始化CUDA设备
@@ -49,32 +49,40 @@ int main(int argc, char* argv[]) {
     NTTParameters<TestDataType> parameters(LOGN, ReductionPolynomial::X_N_minus);
 #else
     // 自定义模数配置
-    NTTFactors factor((Modulus) 576460752303415297, 288482366111684746, 238394956950829);
-    NTTParameters parameters(LOGN, factor, ReductionPolynomial::X_N_minus);
+    NTTFactors<TestDataType> factor(Modulus<TestDataType>(576460752303415297), 288482366111684746, 238394956950829);
+    NTTParameters<TestDataType> parameters(LOGN, factor, ReductionPolynomial::X_N_minus);
 #endif
 
     // 创建CPU端NTT生成器
+    // parameters.modulus.value = 268582913;
     NTTCPU<TestDataType> generator(parameters);  // 用于生成参考结果的CPU实现
 
     cout << "默认模数 = " << parameters.modulus.value << endl;
     // 初始化随机数生成器
     std::random_device rd;
     std::mt19937 gen(0);  // 固定种子用于结果可复现
-    unsigned long long maxNumber = parameters.modulus.value - 1;
+    // unsigned long long maxNumber = parameters.modulus.value - 1;
+    unsigned long long maxNumber = 5;
     std::uniform_int_distribution<unsigned long long> dis(0, maxNumber);
 
     // 生成随机输入数据
+    cout << "生成随机输入数据: input1, input2 ---------------------------------------------------------" << endl;
     vector<vector<TestDataType>> input1(BATCH), input2(BATCH);
     for (int j = 0; j < BATCH; j++) {
         for (int i = 0; i < parameters.n; i++) {  // parameters.n = 2^LOGN
-            input1[j].push_back(dis(gen));  // 生成[0, modulus-1]范围内的随机数
-            input2[j].push_back(dis(gen));
+            // input1[j].push_back(dis(gen));  // 生成[0, modulus-1]范围内的随机数
+            input1[j].push_back(0);
+            // input2[j].push_back(dis(gen));
+            input2[j].push_back(0);
         }
         print_array(input1[j].data(), "input1[" + std::to_string(j) + "]");
         print_array(input2[j].data(), "input2[" + std::to_string(j) + "]");
     }
+    input1[0][0] = 1;input1[0][1] = 2;input1[0][parameters.n-1] = 3;
+    input2[0][0] = 1;input2[0][1] = 1;input2[0][2] = 1;
 
     // 执行CPU端NTT（生成参考结果）
+    cout << "CPU NTT: ntt(input1), ntt(input2) ---------------------------------------------------" << endl;
     vector<vector<TestDataType>> ntt_result(BATCH), ntt_result2(BATCH);
     for (int i = 0; i < BATCH; i++) {
         ntt_result[i] = generator.ntt(input1[i]);  // CPU NTT计算
@@ -82,7 +90,21 @@ int main(int argc, char* argv[]) {
         print_array(ntt_result[i].data(), "ntt_result[" + std::to_string(i) + "]");
         print_array(ntt_result2[i].data(), "ntt_result2[" + std::to_string(i) + "]");
     }
-
+{  
+    // // Karasuba 验证
+    // vector<TestDataType> test_result, x1, x2, test_result2;
+    // // f0 * g0 + f1 * g1
+    // x1 = generator.mult(ntt_result[0], ntt_result2[0]);
+    // x2 = generator.mult(ntt_result[1], ntt_result2[1]);
+    // test_result = generator.add(x1, x2);
+    // print_array(test_result.data(), "test_result");
+    // x1 = generator.mult(ntt_result[0], ntt_result2[1]);
+    // x2 = generator.mult(ntt_result[1], ntt_result2[0]);
+    // test_result2 = generator.add(x1, x2);
+    // print_array(test_result2.data(), "test_result2");
+}
+    // Karatsuba 计算
+    cout << "Karatsuba(ntt(input1), ntt(input2)) --------------------------------------------------" << endl;
     // 处理对角线项 diag_term[i] = ntt_result[i] * ntt_result2[i]
     vector<vector<TestDataType>> diag_term(BATCH);
     for(int i = 0; i < BATCH; i++)
@@ -113,7 +135,7 @@ int main(int argc, char* argv[]) {
     {
         other_term[2 * i] = generator.add(other_term[2 * i], diag_term[i]);
     }
-    // 合并结果
+    // other_term[i] + other_term[i + BATCH] 
     vector<vector<TestDataType>> ntt_result_final(BATCH);
     for(int i = 0; i < BATCH; ++i)
     {
@@ -121,8 +143,59 @@ int main(int argc, char* argv[]) {
         ntt_result_final[i] = generator.add(other_term[i], other_term[i + BATCH]);
         print_array(ntt_result_final[i].data(), "ntt_result_final[" + std::to_string(i) + "]");
     }
-    
+    // INTT操作
+    cout << "INTT( Karatsuba( ntt(input1), ntt(input2) ) ) -------------------------------------" << endl;
+    vector<vector<TestDataType>> result_final(BATCH);
+    for (int i = 0; i < BATCH; ++i)
+    {
+        result_final[i] = generator.intt(ntt_result_final[i]);
+        print_array(result_final[i].data(), "result_final[" + std::to_string(i) + "]");
+    }
+    // 合并结果
+    vector<TestDataType> result_merged;
+    for (const auto &part : result_final)
+    {
+        result_merged.insert(result_merged.end(), part.begin(), part.end());
+    }
+    print_array(result_merged.data(), "result_merged");
 
+
+
+    // 合并输入验证
+    cout << "合并输入验证 merge(input1), merge(input2)" << endl;
+    vector<TestDataType> merged_input1, merged_input2;
+    for (const auto &part : input1)
+    {
+        merged_input1.insert(merged_input1.end(), part.begin(), part.end());
+    }
+    print_array(merged_input1.data(), "merged_input1");
+    for(const auto &part : input2)
+    {
+        merged_input2.insert(merged_input2.end(), part.begin(), part.end());
+    }
+    print_array(merged_input2.data(), "merged_input2");
+
+    // NTT 乘法验证
+    NTTParameters<TestDataType> parameters_merged(LOGN+1, ReductionPolynomial::X_N_minus);
+    // parameters_merged.modulus.value = 268460033;
+    cout << "merged模数 = " << parameters_merged.modulus.value << endl;
+    cout << "INTT( NTT(merged_input1) * NTT(merged_input2) ) " << endl;
+    NTTCPU<TestDataType> generator_merged(parameters_merged);
+    vector<TestDataType> merged_ntt_result1 = generator_merged.ntt(merged_input1);
+    vector<TestDataType> merged_ntt_result2 = generator_merged.ntt(merged_input2); 
+    vector<TestDataType> merged_ntt_result = generator_merged.mult(merged_ntt_result1, merged_ntt_result2);
+    vector<TestDataType> intt_merged_ntt_result = generator_merged.intt(merged_ntt_result);
+    print_array(intt_merged_ntt_result.data(), "intt_merged_ntt_result");
+    cout << "merged_input1[n-1]:" << merged_input1[parameters.n-1] << endl;
+    // 执行schoolbook乘法
+    cout << "schoolbook_poly_multiplication( merged_input1, merged_input2 )" << endl;
+    vector<TestDataType> merged_schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
+    merged_input1, 
+    merged_input2,
+    parameters.modulus,
+    parameters.poly_reduction  // 来自 NTTParameters
+    );
+    print_array(merged_schoolbook_result.data(), "merged_schoolbook_result");
     // 当Batch = 2， 计算ntt_result[0] * ntt_result[1]
     
     vector<TestDataType> ntt_mult_result(parameters.n);
