@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
         LOGN = atoi(argv[1]);  // 第一个参数为LOGN
         BATCH = atoi(argv[2]); // 第二个参数为BATCH
     }
-    int alpha = 1;
+    int alpha = 2;
     BATCH = 1 << alpha;
     cout << "LOGN = " << LOGN << ", BATCH = " << BATCH << endl;
 
@@ -66,8 +66,9 @@ int main(int argc, char* argv[]) {
     // unsigned long long maxNumber = 5;
     std::uniform_int_distribution<unsigned long long> dis(0, maxNumber);
 
+    cout << endl << "-----CPU 计算-----" << endl;
     // 生成随机输入数据
-    cout << "生成随机输入数据: input1, input2 ---------------------------------------------------------" << endl;
+    cout << endl << "1.生成随机输入数据: input1, input2" << endl;
     vector<vector<TestDataType>> input1(BATCH), input2(BATCH);
     for (int j = 0; j < BATCH; j++) {
         for (int i = 0; i < parameters.n; i++) {  // parameters.n = 2^LOGN
@@ -83,7 +84,7 @@ int main(int argc, char* argv[]) {
     // input2[0][0] = 1;input2[0][1] = 1;input2[0][2] = 1;
 
     // 执行CPU端NTT（生成参考结果）
-    cout << "CPU NTT: ntt(input1), ntt(input2) ---------------------------------------------------" << endl;
+    cout << endl << "2.CPU NTT: ntt(input1), ntt(input2) " << endl;
     vector<vector<TestDataType>> ntt_result(BATCH), ntt_result2(BATCH);
     for (int i = 0; i < BATCH; i++) {
         ntt_result[i] = generator.ntt(input1[i]);  // CPU NTT计算
@@ -105,7 +106,7 @@ int main(int argc, char* argv[]) {
     print_array(test_result2.data(), "test_result2");
 }
     // Karatsuba 计算
-    cout << "Karatsuba(ntt(input1), ntt(input2)) --------------------------------------------------" << endl;
+    cout << endl << "3.Karatsuba(ntt(input1), ntt(input2)) " << endl;
     // 处理对角线项 diag_term[i] = ntt_result[i] * ntt_result2[i]
     vector<vector<TestDataType>> diag_term(BATCH);
     for(int i = 0; i < BATCH; i++)
@@ -145,7 +146,7 @@ int main(int argc, char* argv[]) {
         print_array(ntt_result_final[i].data(), "ntt_result_final[" + std::to_string(i) + "]");
     }
     // INTT操作
-    cout << "INTT( Karatsuba( ntt(input1), ntt(input2) ) ) -------------------------------------" << endl;
+    cout << endl << "4.INTT( Karatsuba( ntt(input1), ntt(input2) ) ) " << endl;
     vector<vector<TestDataType>> result_final(BATCH);
     for (int i = 0; i < BATCH; ++i)
     {
@@ -163,7 +164,7 @@ int main(int argc, char* argv[]) {
 
 
     // 合并输入验证
-    cout << "合并输入验证 merge(input1), merge(input2)" << endl;
+    cout << endl << "5.合并输入验证 merge(input1), merge(input2)" << endl;
     vector<TestDataType> merged_input1, merged_input2;
     for (const auto &part : input1)
     {
@@ -179,17 +180,17 @@ int main(int argc, char* argv[]) {
     // NTT 乘法验证
     NTTParameters<TestDataType> parameters_merged(LOGN + alpha, ReductionPolynomial::X_N_minus);
     // parameters_merged.modulus.value = 268460033;
-    cout << "merged模数 = " << parameters_merged.modulus.value << endl;
-    cout << "INTT( NTT(merged_input1) * NTT(merged_input2) ) " << endl;
+    // cout << "merged模数 = " << parameters_merged.modulus.value << endl;
+    cout << endl << "INTT( NTT(merged_input1) * NTT(merged_input2) ) " << endl;
     NTTCPU<TestDataType> generator_merged(parameters_merged);
     vector<TestDataType> merged_ntt_result1 = generator_merged.ntt(merged_input1);
     vector<TestDataType> merged_ntt_result2 = generator_merged.ntt(merged_input2); 
     vector<TestDataType> merged_ntt_result = generator_merged.mult(merged_ntt_result1, merged_ntt_result2);
     vector<TestDataType> intt_merged_ntt_result = generator_merged.intt(merged_ntt_result);
     print_array(intt_merged_ntt_result.data(), "intt_merged_ntt_result");
-    cout << "merged_input1[n-1]:" << merged_input1[parameters.n-1] << endl;
+    // cout << "merged_input1[n-1]:" << merged_input1[parameters.n-1] << endl;
     // 执行schoolbook乘法
-    cout << "schoolbook_poly_multiplication( merged_input1, merged_input2 )" << endl;
+    cout << endl << "schoolbook_poly_multiplication( merged_input1, merged_input2 )" << endl;
     vector<TestDataType> merged_schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
     merged_input1, 
     merged_input2,
@@ -197,40 +198,46 @@ int main(int argc, char* argv[]) {
     parameters.poly_reduction  // 来自 NTTParameters
     );
     print_array(merged_schoolbook_result.data(), "merged_schoolbook_result");
-    // 当Batch = 2， 计算ntt_result[0] * ntt_result[1]
-    
-    vector<TestDataType> ntt_mult_result(parameters.n);
-    // for (int i = 0; i < parameters.n; i++) {
-    //     // ntt_mult_result[i] = OPERATOR<TestDataType>::mult(input1[0][i], input1[1][i], parameters.modulus);
-    //     unsigned long long ref = (unsigned long long)ntt_result[0][i] * ntt_result[1][i];
-    //     ntt_mult_result[i] = ref % parameters.modulus.value;
-    // }
-    ntt_mult_result = generator.mult(ntt_result[0], ntt_result[1]);
-    // print_array(ntt_mult_result.data(), "ntt_mult_result");
+    // 当Batch = 2， 计算ntt_result[0] * ntt_result[1]    
+    {   
+        // vector<TestDataType> ntt_mult_result(parameters.n);
+        // { 
+        //     // for (int i = 0; i < parameters.n; i++) {
+        //     //     // ntt_mult_result[i] = OPERATOR<TestDataType>::mult(input1[0][i], input1[1][i], parameters.modulus);
+        //     //     unsigned long long ref = (unsigned long long)ntt_result[0][i] * ntt_result[1][i];
+        //     //     ntt_mult_result[i] = ref % parameters.modulus.value;
+        //     // }
+        // }
+        // ntt_mult_result = generator.mult(ntt_result[0], ntt_result[1]);
+        // // print_array(ntt_mult_result.data(), "ntt_mult_result");
 
-    // 执行CPU端乘法后INTT（生成参考结果）
-    vector<TestDataType> mult_result = generator.intt(ntt_mult_result);
-    // print_array(mult_result.data(), "mult_result");
+        // // 执行CPU端乘法后INTT（生成参考结果）
+        // vector<TestDataType> mult_result = generator.intt(ntt_mult_result);
+        // // print_array(mult_result.data(), "mult_result");
 
-    // 执行schoolbook乘法
-    vector<TestDataType> schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
-    input1[0], 
-    input1[1],
-    parameters.modulus,
-    parameters.poly_reduction  // 来自 NTTParameters
-    );
-    // print_array(schoolbook_result.data(), "schoolbook_result");
-    
-
-
-    
-
-    // 执行CPU端INTT（生成参考结果）
-    vector<vector<TestDataType>> intt_result(BATCH);
-    for (int i = 0; i < BATCH; i++) {
-        intt_result[i] = generator.intt(ntt_result[i]);  // CPU INTT计算
-        // print_array(intt_result[i].data(), "intt_result[" + std::to_string(i) + "]");
+        // // 执行schoolbook乘法
+        // {   
+        //     // vector<TestDataType> schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
+        //     // input1[0], 
+        //     // input1[1],
+        //     // parameters.modulus,
+        //     // parameters.poly_reduction  // 来自 NTTParameters
+        //     // );
+        //     // print_array(schoolbook_result.data(), "schoolbook_result");
+        // }
+            // 执行CPU端INTT（生成参考结果）
+        // vector<vector<TestDataType>> intt_result(BATCH);
+        // for (int i = 0; i < BATCH; i++) {
+        //     intt_result[i] = generator.intt(ntt_result[i]);  // CPU INTT计算
+        //     // print_array(intt_result[i].data(), "intt_result[" + std::to_string(i) + "]");
+        // }
     }
+    
+
+
+    
+
+
 
     cout << "-----------------GPU 计算-----------------" << endl;
     // 准备旋转因子表-----------------------------------------------------
@@ -322,18 +329,20 @@ int main(int argc, char* argv[]) {
         BATCH,                     // 批量数
         1                          // 流数量
     );
+    {
+    //     // 回传结果并验证-----------------------------------------------------
+    //     TestDataType* Output_Host =  // 主机端结果缓冲区
+    //         (TestDataType*)malloc(BATCH * parameters.n * sizeof(TestDataType));
+        
+    //     GPUNTT_CUDA_CHECK(cudaMemcpy(Output_Host,   // 目标地址
+    //                             InOut_Datas,   // 源数据
+    //                             BATCH * parameters.n * sizeof(TestDataType),
+    //                             cudaMemcpyDeviceToHost));
+    //     print_array(Output_Host, "GPU_NTT(input1)");
+    //     // 结果验证
+    //     VERIFY_RESULTS(Output_Host, ntt_result, "NTT结果正确");
+    }
 
-    // 回传结果并验证-----------------------------------------------------
-    TestDataType* Output_Host =  // 主机端结果缓冲区
-        (TestDataType*)malloc(BATCH * parameters.n * sizeof(TestDataType));
-    
-    GPUNTT_CUDA_CHECK(cudaMemcpy(Output_Host,   // 目标地址
-                               InOut_Datas,   // 源数据
-                               BATCH * parameters.n * sizeof(TestDataType),
-                               cudaMemcpyDeviceToHost));
-    print_array(Output_Host, "GPU_NTT(input1)");
-    // 结果验证
-    VERIFY_RESULTS(Output_Host, ntt_result, "NTT结果正确");
     {
         // bool check = true;
         // for (int i = 0; i < BATCH; i++) {
@@ -363,11 +372,13 @@ int main(int argc, char* argv[]) {
         0                                 // 使用默认流
     );
     //验证
+    TestDataType* Output_Host =  // 主机端结果缓冲区
+    (TestDataType*)malloc(BATCH * parameters.n * sizeof(TestDataType));
     GPUNTT_CUDA_CHECK(cudaMemcpy(Output_Host,   // 目标地址
                                diag_term_device,   // 源数据
                                BATCH * parameters.n * sizeof(TestDataType),
                                cudaMemcpyDeviceToHost));
-    print_array(Output_Host, "GPU对角线项结果");
+    // print_array(Output_Host, "GPU对角线项结果");
     VERIFY_RESULTS(Output_Host, diag_term, "GPU计算对角线项结果正确");
 
     // 处理其它项
@@ -417,7 +428,7 @@ int main(int argc, char* argv[]) {
     GPUNTT_CUDA_CHECK(cudaMemcpy(host_other_term, other_term_device, 
                             2*BATCH*parameters.n*sizeof(TestDataType),
                             cudaMemcpyDeviceToHost));
-    print_array(host_other_term, "GPU 计算其它项结果");
+    // print_array(host_other_term, "GPU 计算其它项结果");
     VERIFY_RESULTS(host_other_term, other_term, "GPU计算其它项结果正确");
 
     // 合并结果
@@ -470,83 +481,85 @@ int main(int argc, char* argv[]) {
                             cudaMemcpyDeviceToHost));
     VERIFY_RESULTS(host_result, result_final, "Karatsuba_GPU计算结果正确");
 
-    // 执行GPU INTT--------------------------------------------------------
-    TestDataType* Out_Datas;
-    GPUNTT_CUDA_CHECK(
-        cudaMalloc(&Out_Datas, BATCH * parameters.n * sizeof(TestDataType))); 
+    { 
+    //     // 执行GPU INTT--------------------------------------------------------
+    //     TestDataType* Out_Datas;
+    //     GPUNTT_CUDA_CHECK(
+    //         cudaMalloc(&Out_Datas, BATCH * parameters.n * sizeof(TestDataType))); 
 
-    GPU_NTT(InOut_Datas, Out_Datas, Inverse_Omega_Table_Device, test_modulus,
-            cfg_intt, BATCH, 1);
+    //     GPU_NTT(InOut_Datas, Out_Datas, Inverse_Omega_Table_Device, test_modulus,
+    //             cfg_intt, BATCH, 1);
 
-    // 回传结果并验证-----------------------------------------------------
-    GPUNTT_CUDA_CHECK(cudaMemcpy(Output_Host,   // 目标地址
-                            Out_Datas,   // 源数据
-                            BATCH * parameters.n * sizeof(TestDataType),
-                            cudaMemcpyDeviceToHost));
+    //     // 回传结果并验证-----------------------------------------------------
+    //     GPUNTT_CUDA_CHECK(cudaMemcpy(Output_Host,   // 目标地址
+    //                             Out_Datas,   // 源数据
+    //                             BATCH * parameters.n * sizeof(TestDataType),
+    //                             cudaMemcpyDeviceToHost));
 
-    // 结果验证
-    bool check = true;
-    for (int i = 0; i < BATCH; i++) {
-        check = check_result(  // 自定义结果验证函数
-            Output_Host + (i * parameters.n),  // GPU结果位置
-            intt_result[i].data(),             // CPU参考结果
-            parameters.n                       // 数据长度
-        );
+    //     // 结果验证
+    //     bool check = true;
+    //     for (int i = 0; i < BATCH; i++) {
+    //         check = check_result(  // 自定义结果验证函数
+    //             Output_Host + (i * parameters.n),  // GPU结果位置
+    //             intt_result[i].data(),             // CPU参考结果
+    //             parameters.n                       // 数据长度
+    //         );
 
-        if (!check) {
-            cout << "第 " << i << " 个多项式验证失败" <<endl;
-        }
+    //         if (!check) {
+    //             cout << "第 " << i << " 个多项式验证失败" <<endl;
+    //         }
+    //     }
+    //     if (check) cout << "INTT结果正确" << endl;
+
+
+    //     // GPU内存分配与数据传输-----------------------------------------------
+    //     TestDataType* NTT_Mult_Result_GPU;  // GPU输入/输出数据指针
+    //     GPUNTT_CUDA_CHECK(  // 带错误检查的CUDA内存分配
+    //         cudaMalloc(&NTT_Mult_Result_GPU, parameters.n * sizeof(TestDataType)));
+    //     // 计算 NTT乘法结果 NTT_Mult_Result_GPU = &InOut_Datas * &(InOut_Datas + parameters.n)
+
+
+    //     // 在GPU NTT计算之后添加点乘调用
+    //     PointwiseMultiply<TestDataType>(
+    //         InOut_Datas,                      // 第一个多项式地址
+    //         InOut_Datas + parameters.n,       // 第二个多项式地址（BATCH=2时偏移）
+    //         NTT_Mult_Result_GPU,              // 输出地址
+    //         parameters.modulus,               // 模数参数
+    //         parameters.n,                     // 多项式长度
+    //         1,                                // 批量数
+    //         0                                 // 使用默认流
+    //     );
+
+    //     // 添加结果验证代码
+    //     TestDataType* mult_host_result = (TestDataType*)malloc(parameters.n * sizeof(TestDataType));
+    //     GPUNTT_CUDA_CHECK(cudaMemcpy(mult_host_result, NTT_Mult_Result_GPU, 
+    //                             parameters.n * sizeof(TestDataType),
+    //                             cudaMemcpyDeviceToHost));
+
+    //     // 与CPU结果对比
+    //     check = check_result(mult_host_result, 
+    //                     ntt_mult_result.data(),
+    //                     parameters.n);
+    //     if (check) cout << "点乘结果正确" << endl;
+
+    //     // INTT点乘结果验证
+    //     TestDataType* Mult_Result_GPU;      
+    //     GPUNTT_CUDA_CHECK(
+    //         cudaMalloc(&Mult_Result_GPU, BATCH * parameters.n * sizeof(TestDataType)));
+    //     // INTT( NTT_Mult_Result_GPU )
+    //     GPU_NTT(NTT_Mult_Result_GPU, Mult_Result_GPU, Inverse_Omega_Table_Device, test_modulus,
+    //             cfg_intt, 1, 1);
+
+    //     // Mult_Result_GPU 与 CPU 结果对比
+    //     GPUNTT_CUDA_CHECK(cudaMemcpy(mult_host_result, Mult_Result_GPU, 
+    //                         parameters.n * sizeof(TestDataType),
+    //                         cudaMemcpyDeviceToHost));
+    //     check = check_result(mult_host_result, 
+    //                     mult_result.data(),
+    //                     parameters.n);
+    //     // print_array(mult_host_result, "GPU NTT乘法结果");
+    //     if (check) cout << "NTT乘法结果正确" << endl;
     }
-    if (check) cout << "INTT结果正确" << endl;
-
-
-    // GPU内存分配与数据传输-----------------------------------------------
-    TestDataType* NTT_Mult_Result_GPU;  // GPU输入/输出数据指针
-    GPUNTT_CUDA_CHECK(  // 带错误检查的CUDA内存分配
-        cudaMalloc(&NTT_Mult_Result_GPU, parameters.n * sizeof(TestDataType)));
-    // 计算 NTT乘法结果 NTT_Mult_Result_GPU = &InOut_Datas * &(InOut_Datas + parameters.n)
-
-
-    // 在GPU NTT计算之后添加点乘调用
-    PointwiseMultiply<TestDataType>(
-        InOut_Datas,                      // 第一个多项式地址
-        InOut_Datas + parameters.n,       // 第二个多项式地址（BATCH=2时偏移）
-        NTT_Mult_Result_GPU,              // 输出地址
-        parameters.modulus,               // 模数参数
-        parameters.n,                     // 多项式长度
-        1,                                // 批量数
-        0                                 // 使用默认流
-    );
-
-    // 添加结果验证代码
-    TestDataType* mult_host_result = (TestDataType*)malloc(parameters.n * sizeof(TestDataType));
-    GPUNTT_CUDA_CHECK(cudaMemcpy(mult_host_result, NTT_Mult_Result_GPU, 
-                            parameters.n * sizeof(TestDataType),
-                            cudaMemcpyDeviceToHost));
-
-    // 与CPU结果对比
-    check = check_result(mult_host_result, 
-                    ntt_mult_result.data(),
-                    parameters.n);
-    if (check) cout << "点乘结果正确" << endl;
-
-    // INTT点乘结果验证
-    TestDataType* Mult_Result_GPU;      
-    GPUNTT_CUDA_CHECK(
-        cudaMalloc(&Mult_Result_GPU, BATCH * parameters.n * sizeof(TestDataType)));
-    // INTT( NTT_Mult_Result_GPU )
-    GPU_NTT(NTT_Mult_Result_GPU, Mult_Result_GPU, Inverse_Omega_Table_Device, test_modulus,
-            cfg_intt, 1, 1);
-
-    // Mult_Result_GPU 与 CPU 结果对比
-    GPUNTT_CUDA_CHECK(cudaMemcpy(mult_host_result, Mult_Result_GPU, 
-                        parameters.n * sizeof(TestDataType),
-                        cudaMemcpyDeviceToHost));
-    check = check_result(mult_host_result, 
-                    mult_result.data(),
-                    parameters.n);
-    // print_array(mult_host_result, "GPU NTT乘法结果");
-    if (check) cout << "NTT乘法结果正确" << endl;
 
     // 资源释放-----------------------------------------------------------
     GPUNTT_CUDA_CHECK(cudaFree(InOut_Datas));
@@ -556,9 +569,9 @@ int main(int argc, char* argv[]) {
     GPUNTT_CUDA_CHECK(cudaFree(Inverse_Omega_Table_Device));
     free(Output_Host);
 
-    GPUNTT_CUDA_CHECK(cudaFree(NTT_Mult_Result_GPU));
-    free(mult_host_result);
-    GPUNTT_CUDA_CHECK(cudaFree(Mult_Result_GPU));
+    // GPUNTT_CUDA_CHECK(cudaFree(NTT_Mult_Result_GPU));
+    // free(mult_host_result);
+    // GPUNTT_CUDA_CHECK(cudaFree(Mult_Result_GPU));
 
     GPUNTT_CUDA_CHECK(cudaFree(diag_term_device));
     GPUNTT_CUDA_CHECK(cudaFree(other_term_device));
