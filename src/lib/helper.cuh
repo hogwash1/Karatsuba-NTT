@@ -1,7 +1,8 @@
 #pragma once  // 添加头文件保护
 #include "ntt.cuh"    // 包含 TestDataType 定义文件
 #include <string>     // 添加 string 支持
-
+#include <vector>
+using namespace std;
 
 // 打印函数
 template<typename T>
@@ -13,14 +14,15 @@ void print_array(const T *data, const std::string &title) {
     }
     std::cout << "]" << std::endl;
 }
+
 #define VERIFY_RESULTS(output_ptr, ref_result, success_msg) \
 do { \
     bool check = true; \
     for (int i = 0; i < BATCH; i++) { \
         check = check_result( \
-            output_ptr + (i * parameters.n), \
+            output_ptr + (i * parameters_2n.n), \
             ref_result[i].data(), \
-            parameters.n \
+            parameters_2n.n \
         ); \
         if (!check) { \
             std::cout << "第 " << i << " 个多项式验证失败" << std::endl; \
