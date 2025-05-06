@@ -1,5 +1,6 @@
 #include <cstdlib>    // 标准库头文件
 #include <random>     // 随机数生成库
+#include <chrono>     // 时间库头文件
 #include "ntt.cuh"    // GPU-NTT 库核心头文件
 #include "lib/helper.cuh"
 
@@ -235,6 +236,22 @@ int main(int argc, char* argv[]) {
 
 
     cout << "-----------------GPU 计算-----------------" << endl;
+
+    // 在GPU计算开始处添加总计时事件
+    cudaEvent_t total_start, total_stop;
+    GPUNTT_CUDA_CHECK(cudaEventCreate(&total_start));
+    GPUNTT_CUDA_CHECK(cudaEventCreate(&total_stop));
+    // 计时
+    cudaEvent_t start, stop;
+    GPUNTT_CUDA_CHECK(cudaEventCreate(&start));
+    GPUNTT_CUDA_CHECK(cudaEventCreate(&stop));
+    float elapsedTime,totalElapsedTime = 0;
+
+
+    
+    // 在主要计算开始前记录总耗时起点
+    GPUNTT_CUDA_CHECK(cudaEventRecord(total_start, 0));
+
     // 准备旋转因子表-----------------------------------------------------
     Root<TestDataType>* Forward_Omega_Table_Device;  // GPU端正向旋转因子表指针
     GPUNTT_CUDA_CHECK(
@@ -308,6 +325,10 @@ int main(int argc, char* argv[]) {
     }
 
     // 执行GPU NTT--------------------------------------------------------
+
+    // 测量NTT时间
+    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+
     GPU_NTT_Inplace(  // 原地NTT变换
         InOut_Datas,               // 输入/输出数据指针
         Forward_Omega_Table_Device,// 旋转因子表
@@ -325,7 +346,17 @@ int main(int argc, char* argv[]) {
         1                          // 流数量
     );
 
+    GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+    GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+    GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+    std::cout << "双路NTT总耗时: " << elapsedTime << " ms" << std::endl;
+    totalElapsedTime += elapsedTime;
+
     // 处理对角线项 (i = j) diagonal term
+    
+    // 在点乘操作添加计时
+    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+
     TestDataType* diag_term_device;
     GPUNTT_CUDA_CHECK(cudaMalloc(&diag_term_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
         PointwiseMultiply<TestDataType>(
@@ -337,6 +368,13 @@ int main(int argc, char* argv[]) {
         1,                                // 批量数
         0                                 // 使用默认流
     );
+
+    GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+    GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+    GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+    std::cout << "对角线项计算耗时: " << elapsedTime << " ms" << std::endl;
+    totalElapsedTime += elapsedTime;
+
     //验证
     TestDataType* Output_Host =  // 主机端结果缓冲区
     (TestDataType*)malloc(BATCH * parameters_2n.n * sizeof(TestDataType));
@@ -348,6 +386,9 @@ int main(int argc, char* argv[]) {
     VERIFY_RESULTS(Output_Host, diag_term, "GPU计算对角线项结果正确");
 
     // 处理其它项
+    // 在其它项计算添加计时
+    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+
     TestDataType* other_term_device,  *tmp_device1, *tmp_device2, *tmp_device1_2;
     GPUNTT_CUDA_CHECK(cudaMalloc(&other_term_device, 2 * BATCH * parameters_2n.n * sizeof(TestDataType)));
     GPUNTT_CUDA_CHECK(cudaMemset(other_term_device, 0, 2 * BATCH * parameters_2n.n * sizeof(TestDataType))); // 关键初始化
@@ -370,16 +411,16 @@ int main(int argc, char* argv[]) {
             PointwiseSubtract(tmp_device1_2, diag_term_i, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi
             PointwiseSubtract(tmp_device1_2, diag_term_j, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi - fj * gj
             TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
-            PointwiseAdd(other_term_device_i_j, tmp_device1_2, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n);
-            // 验证
-            // 在关键步骤后添加打印
-            {   
-                // TestDataType* debug_host = (TestDataType*)malloc(parameters_2n.n * sizeof(TestDataType));
-                // GPUNTT_CUDA_CHECK(cudaMemcpy(debug_host, tmp_device1_2, parameters_2n.n*sizeof(TestDataType), cudaMemcpyDeviceToHost));
-                // print_array(debug_host, "tmp_device1_2");
-            }          
+            PointwiseAdd(other_term_device_i_j, tmp_device1_2, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n);         
         }
     }
+
+    GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+    GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+    GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+    std::cout << "非对角项计算耗时: " << elapsedTime << " ms" << std::endl;
+    totalElapsedTime += elapsedTime;
+
     GPUNTT_CUDA_CHECK(cudaGetLastError());
     // 对角线项加上其它项
     for(int i = 0; i < BATCH; i++)
@@ -398,6 +439,9 @@ int main(int argc, char* argv[]) {
     VERIFY_RESULTS(host_other_term, other_term, "GPU计算其它项结果正确");
 
     // 合并结果
+    // 在结果合并添加计时
+    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+
     TestDataType* ntt_result_device;
     GPUNTT_CUDA_CHECK(cudaMalloc(&ntt_result_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
     GPUNTT_CUDA_CHECK(cudaMemset(ntt_result_device, 0, BATCH * parameters_2n.n * sizeof(TestDataType)));
@@ -409,13 +453,20 @@ int main(int argc, char* argv[]) {
         TestDataType* ntt_result_i = ntt_result_device + i * parameters_2n.n;
         PointwiseAdd(other_term_i, other_term_i_BATCH, ntt_result_i, parameters_2n.modulus, parameters_2n.n);
     }
+
+    GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+    GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+    GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+    std::cout << "合并对角线项和其它项耗时: " << elapsedTime << " ms" << std::endl;
+    totalElapsedTime += elapsedTime;
+
     // 验证
     TestDataType* host_ntt_result = (TestDataType*)malloc(BATCH*parameters_2n.n*sizeof(TestDataType));
     GPUNTT_CUDA_CHECK(cudaMemcpy(host_ntt_result, ntt_result_device, 
                             BATCH*parameters_2n.n*sizeof(TestDataType),
                             cudaMemcpyDeviceToHost));
     // print_array(host_ntt_result, "GPU 计算合并结果");
-    VERIFY_RESULTS(host_ntt_result, ntt_result_final, "GPU计算合并结果正确");
+    VERIFY_RESULTS(host_ntt_result, ntt_result_final, "GPU计算合并对角线项和其它项结果正确");
 
     // 配置INTT模数参数-------------------------------------------------------
     Ninverse<TestDataType>* test_ninverse;
@@ -436,11 +487,23 @@ int main(int argc, char* argv[]) {
     .stream = 0};
     
     // 执行GPU_INTT( ntt_result_device )--------------------------------------------------------
+    // 在INTT操作添加计时
+    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));  
+
     TestDataType* result_device;
     GPUNTT_CUDA_CHECK(cudaMalloc(&result_device, BATCH * parameters_2n.n * sizeof(TestDataType))); 
     GPU_NTT(ntt_result_device, result_device, Inverse_Omega_Table_Device, test_modulus, cfg_intt, BATCH, 1);
 
+    GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+    GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+    GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+    std::cout << "INTT计算耗时: " << elapsedTime << " ms" << std::endl;
+    totalElapsedTime += elapsedTime;
+        
     // 合并结果
+    // 在结果合并添加计时
+    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+
     TestDataType* result_merged_device;
     GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
     for(int i = 0; i < BATCH; i++)
@@ -453,6 +516,31 @@ int main(int argc, char* argv[]) {
         // result_merged[i] = result[i][0] + result[i-1][1]
         PointwiseAdd(result_i_0 , result_i_1, result_merged_i, parameters_2n.modulus, parameters.n);    //使用parameters_2n.modulus
     }
+
+    GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+    GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+    GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+    std::cout << "合并结果耗时: " << elapsedTime << " ms" << std::endl;
+    totalElapsedTime += elapsedTime;
+
+    // 添加总耗时计算
+    GPUNTT_CUDA_CHECK(cudaEventRecord(total_stop, 0)); 
+    GPUNTT_CUDA_CHECK(cudaEventSynchronize(total_stop));
+    float totalElapsed = 0;
+    GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&totalElapsed, total_start, total_stop));
+    std::cout << "\n----- 总耗时分析 -----" << std::endl;
+    std::cout << "[TOTAL] 核心计算耗时: " << totalElapsedTime << " ms" << std::endl;
+    std::cout << "[TOTAL] 总耗时: " << totalElapsed << " ms" << std::endl;
+    std::cout << "------------------------------" << std::endl;
+
+    // 销毁总计时事件
+    GPUNTT_CUDA_CHECK(cudaEventDestroy(total_start));
+    GPUNTT_CUDA_CHECK(cudaEventDestroy(total_stop));
+
+    // 销毁耗时统计
+    GPUNTT_CUDA_CHECK(cudaEventDestroy(start));
+    GPUNTT_CUDA_CHECK(cudaEventDestroy(stop));
+
     // 验证
     TestDataType* host_result = (TestDataType*)malloc(BATCH * parameters.n * sizeof(TestDataType));
     GPUNTT_CUDA_CHECK(cudaMemcpy(host_result,   // 目标地址
@@ -490,3 +578,4 @@ int main(int argc, char* argv[]) {
 
     return EXIT_SUCCESS;
 }
+// cmake --build .
