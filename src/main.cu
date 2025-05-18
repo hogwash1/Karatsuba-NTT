@@ -235,8 +235,196 @@ int main(int argc, char* argv[]) {
 
 
 
-    cout << "-----------------GPU 计算-----------------" << endl;
+    cout << endl << "-----------------GPU 计算-----------------" << endl;
 
+    cout << endl << "-----------------普通 GPU-NTT 乘法-----------------" << endl;
+
+    {
+        // 在开始处添加总计时事件
+        cudaEvent_t total_start, total_stop;
+        GPUNTT_CUDA_CHECK(cudaEventCreate(&total_start));
+        GPUNTT_CUDA_CHECK(cudaEventCreate(&total_stop));
+        // 计时
+        cudaEvent_t start, stop;
+        GPUNTT_CUDA_CHECK(cudaEventCreate(&start));
+        GPUNTT_CUDA_CHECK(cudaEventCreate(&stop));
+        float elapsedTime,totalElapsedTime = 0;
+
+        GPUNTT_CUDA_CHECK(cudaEventRecord(total_start, 0));
+
+        // 在主要计算开始前记录总耗时起点
+        GPUNTT_CUDA_CHECK(cudaEventRecord(total_start, 0));
+
+        // 准备旋转因子表-----------------------------------------------------
+        Root<TestDataType>* Forward_Omega_Table_Device;  // GPU端正向旋转因子表指针
+        GPUNTT_CUDA_CHECK(
+            cudaMalloc(&Forward_Omega_Table_Device,
+                    parameters_merged.root_of_unity_size * sizeof(Root<TestDataType>)));
+
+        // 生成并拷贝旋转因子表
+        vector<Root<TestDataType>> forward_omega_table = 
+            parameters_merged.gpu_root_of_unity_table_generator(  // 生成旋转因子表
+                parameters_merged.forward_root_of_unity_table);
+        
+        GPUNTT_CUDA_CHECK(cudaMemcpy(Forward_Omega_Table_Device,
+                                    forward_omega_table.data(),
+                                    parameters_merged.root_of_unity_size * sizeof(Root<TestDataType>),
+                                    cudaMemcpyHostToDevice));
+        
+        // 准备逆旋转因子表-----------------------------------------------------
+        Root<TestDataType>* Inverse_Omega_Table_Device;
+
+        GPUNTT_CUDA_CHECK(
+        cudaMalloc(&Inverse_Omega_Table_Device,
+                parameters_merged.root_of_unity_size * sizeof(Root<TestDataType>)));
+
+        vector<Root<TestDataType>> inverse_omega_table =
+        parameters_merged.gpu_root_of_unity_table_generator(
+                    parameters_merged.inverse_root_of_unity_table);
+        GPUNTT_CUDA_CHECK(cudaMemcpy(Inverse_Omega_Table_Device,
+                                    inverse_omega_table.data(),
+                                    parameters_merged.root_of_unity_size * sizeof(Root<TestDataType>),
+                                    cudaMemcpyHostToDevice));
+
+
+        // 配置模数参数-------------------------------------------------------
+        Modulus<TestDataType>* test_modulus;  // GPU端模数参数指针
+        GPUNTT_CUDA_CHECK(cudaMalloc(&test_modulus, sizeof(Modulus<TestDataType>)));
+        
+        Modulus<TestDataType> test_modulus_[1] = {parameters_merged.modulus};  // 主机端模数
+        GPUNTT_CUDA_CHECK(cudaMemcpy(test_modulus, 
+                                test_modulus_,
+                                sizeof(Modulus<TestDataType>),
+                                cudaMemcpyHostToDevice));
+
+        // 配置NTT参数--------------------------------------------------------
+        ntt_rns_configuration<TestDataType> cfg_ntt = {
+            .n_power = LOGN + alpha,                     // log2(N)
+            .ntt_type = FORWARD,                 // 正向变换
+            .reduction_poly = ReductionPolynomial::X_N_minus,  // 约减多项式类型
+            .zero_padding = false,               // 无零填充
+            .stream = 0                          // 使用默认流
+        };
+
+        // GPU内存分配与数据传输-----------------------------------------------
+        TestDataType* Merge_Datas1, *Merge_Datas2;  // GPU输入/输出数据指针
+        GPUNTT_CUDA_CHECK(  // 带错误检查的CUDA内存分配
+                        cudaMalloc(&Merge_Datas1,  parameters_merged.n * sizeof(TestDataType)));
+        GPUNTT_CUDA_CHECK(  // 带错误检查的CUDA内存分配
+                        cudaMalloc(&Merge_Datas2,  parameters_merged.n * sizeof(TestDataType)));
+        
+        GPUNTT_CUDA_CHECK(
+            cudaMemcpy(Merge_Datas1,  // 目标地址
+                       merged_input1.data(),                   // 源数据
+                       parameters_merged.n * sizeof(TestDataType),// 数据大小
+                       cudaMemcpyHostToDevice));           // 传输方向
+        GPUNTT_CUDA_CHECK(
+            cudaMemcpy(Merge_Datas2,  // 目标地址
+                       merged_input2.data(),                   // 源数据
+                       parameters_merged.n * sizeof(TestDataType),// 数据大小
+                       cudaMemcpyHostToDevice));           // 传输方向
+                
+        GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+        // 执行GPU-NTT变换
+        GPU_NTT_Inplace(  // 原地NTT变换
+            Merge_Datas1,               // 输入/输出数据指针
+            Forward_Omega_Table_Device,// 旋转因子表
+            test_modulus,              // 模数参数
+            cfg_ntt,                   // 配置参数
+            1,                          // 批量数
+            1                          // 流数量
+        );
+        GPU_NTT_Inplace(  // 原地NTT变换
+            Merge_Datas2,               // 输入/输出数据指针
+            Forward_Omega_Table_Device,// 旋转因子表
+            test_modulus,              // 模数参数
+            cfg_ntt,                   // 配置参数
+            1,                          // 批量数
+            1                          // 流数量
+        );
+        GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+        GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+        GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+        std::cout << "普通NTT耗时: " << elapsedTime << " ms" << std::endl;
+        totalElapsedTime += elapsedTime;
+
+        GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+        // 执行乘法操作
+        PointwiseMultiply(Merge_Datas1, Merge_Datas2, Merge_Datas1, parameters_merged.modulus, parameters_merged.n);
+        
+        GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+        GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+        GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+        std::cout << "点乘耗时: " << elapsedTime << " ms" << std::endl;
+        totalElapsedTime += elapsedTime;
+
+
+        // 配置INTT模数参数-------------------------------------------------------
+        Ninverse<TestDataType>* test_ninverse;
+        GPUNTT_CUDA_CHECK(cudaMalloc(&test_ninverse, sizeof(Ninverse<TestDataType>)));
+
+        Ninverse<TestDataType> test_ninverse_[1] = {parameters_merged.n_inv};
+
+        GPUNTT_CUDA_CHECK(cudaMemcpy(test_ninverse, test_ninverse_,
+                                    sizeof(Ninverse<TestDataType>), cudaMemcpyHostToDevice));
+
+        // 配置INTT参数--------------------------------------------------------
+        ntt_rns_configuration<TestDataType> cfg_intt = {
+            .n_power = LOGN + alpha,
+            .ntt_type = INVERSE,
+            .reduction_poly = ReductionPolynomial::X_N_minus,
+            .zero_padding = false,
+            .mod_inverse = test_ninverse,
+            .stream = 0
+        };
+
+
+        GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+        // 执行INTT变换
+        GPU_NTT_Inplace(  // 原地NTT变换
+            Merge_Datas1,               // 输入/输出数据指针
+            Inverse_Omega_Table_Device,// 旋转因子表
+            test_modulus,              // 模数参数
+            cfg_intt,                   // 配置参数
+            1,                          // 批量数
+            1                          // 流数量
+        );
+
+        GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
+        GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
+        GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
+        std::cout << "普通INTT耗时: " << elapsedTime << " ms" << std::endl;
+        totalElapsedTime += elapsedTime;
+        //  GPU_NTT(ntt_result_device, result_device, Inverse_Omega_Table_Device, test_modulus, cfg_intt, BATCH, 1);
+
+        // 添加总耗时计算
+        GPUNTT_CUDA_CHECK(cudaEventRecord(total_stop, 0)); 
+        GPUNTT_CUDA_CHECK(cudaEventSynchronize(total_stop));
+        float totalElapsed = 0;
+        GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&totalElapsed, total_start, total_stop));
+        std::cout << "\n----- 普通GPU-NTT总耗时分析 -----" << std::endl;
+        std::cout << "[TOTAL] 核心计算耗时: " << totalElapsedTime << " ms" << std::endl;
+        std::cout << "[TOTAL] 总耗时: " << totalElapsed << " ms" << std::endl;
+        std::cout << "------------------------------" << std::endl;
+
+        // 销毁总计时事件
+        GPUNTT_CUDA_CHECK(cudaEventDestroy(total_start));
+        GPUNTT_CUDA_CHECK(cudaEventDestroy(total_stop));
+
+        // 销毁耗时统计
+        GPUNTT_CUDA_CHECK(cudaEventDestroy(start));
+        GPUNTT_CUDA_CHECK(cudaEventDestroy(stop));
+
+        GPUNTT_CUDA_CHECK( cudaFree(Merge_Datas1) );
+        GPUNTT_CUDA_CHECK( cudaFree(Merge_Datas2) );
+        GPUNTT_CUDA_CHECK( cudaFree(Forward_Omega_Table_Device) );
+        GPUNTT_CUDA_CHECK( cudaFree(Inverse_Omega_Table_Device) );
+        GPUNTT_CUDA_CHECK( cudaFree(test_modulus) );
+        GPUNTT_CUDA_CHECK( cudaFree(test_ninverse) );
+    }
+
+
+    cout << endl << "---------------Karatsuba-NTT乘法---------------" << endl;
     // 在GPU计算开始处添加总计时事件
     cudaEvent_t total_start, total_stop;
     GPUNTT_CUDA_CHECK(cudaEventCreate(&total_start));
@@ -395,23 +583,37 @@ int main(int argc, char* argv[]) {
     GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device1, parameters_2n.n * sizeof(TestDataType)));   // 暂存计算中间项
     GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device2, parameters_2n.n * sizeof(TestDataType)));
     GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device1_2, parameters_2n.n * sizeof(TestDataType)));
+    #pragma unroll
     for(int i = 0; i < BATCH; i++)
     {
+        #pragma unroll
         for(int j = i + 1; j < BATCH; j++)
         {
+            // TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
+            // TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
+            // PointwiseAdd(fi, fj, tmp_device1, parameters_2n.modulus, parameters_2n.n);    // fi + fj
+            // TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
+            // TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
+            // PointwiseAdd(gi, gj, tmp_device2, parameters_2n.modulus, parameters_2n.n);    // gi + gj
+            // PointwiseMultiply(tmp_device1, tmp_device2, tmp_device1_2, parameters_2n.modulus, parameters_2n.n);    // (fi + fj) * (gi + gj)
+            // TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
+            // TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
+            // PointwiseSubtract(tmp_device1_2, diag_term_i, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi
+            // PointwiseSubtract(tmp_device1_2, diag_term_j, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi - fj * gj
+            // TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
+            // PointwiseAdd(other_term_device_i_j, tmp_device1_2, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n); 
+            
+            
             TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
             TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
-            PointwiseAdd(fi, fj, tmp_device1, parameters_2n.modulus, parameters_2n.n);    // fi + fj
             TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
             TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
-            PointwiseAdd(gi, gj, tmp_device2, parameters_2n.modulus, parameters_2n.n);    // gi + gj
-            PointwiseMultiply(tmp_device1, tmp_device2, tmp_device1_2, parameters_2n.modulus, parameters_2n.n);    // (fi + fj) * (gi + gj)
             TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
             TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
-            PointwiseSubtract(tmp_device1_2, diag_term_i, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi
-            PointwiseSubtract(tmp_device1_2, diag_term_j, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi - fj * gj
             TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
-            PointwiseAdd(other_term_device_i_j, tmp_device1_2, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n);         
+            karatsuba(fi, fj, gi, gj, diag_term_i, diag_term_j, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n);
+
+
         }
     }
 
@@ -445,14 +647,16 @@ int main(int argc, char* argv[]) {
     TestDataType* ntt_result_device;
     GPUNTT_CUDA_CHECK(cudaMalloc(&ntt_result_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
     GPUNTT_CUDA_CHECK(cudaMemset(ntt_result_device, 0, BATCH * parameters_2n.n * sizeof(TestDataType)));
-    for(int i = 0; i < BATCH; i++)
-    {
-        // other_term[i] + other_term[i + BATCH] 
-        TestDataType* other_term_i = other_term_device + i * parameters_2n.n;
-        TestDataType* other_term_i_BATCH = other_term_device + (i + BATCH) * parameters_2n.n;
-        TestDataType* ntt_result_i = ntt_result_device + i * parameters_2n.n;
-        PointwiseAdd(other_term_i, other_term_i_BATCH, ntt_result_i, parameters_2n.modulus, parameters_2n.n);
-    }
+    // #pragma unroll
+    // for(int i = 0; i < BATCH; i++)
+    // {
+    //     // other_term[i] + other_term[i + BATCH] 
+    //     TestDataType* other_term_i = other_term_device + i * parameters_2n.n;
+    //     TestDataType* other_term_i_BATCH = other_term_device + (i + BATCH) * parameters_2n.n;
+    //     TestDataType* ntt_result_i = ntt_result_device + i * parameters_2n.n;
+    //     PointwiseAdd(other_term_i, other_term_i_BATCH, ntt_result_i, parameters_2n.modulus, parameters_2n.n);
+    // }
+    PointwiseAdd(other_term_device, other_term_device + (BATCH * parameters_2n.n), ntt_result_device, parameters_2n.modulus, BATCH * parameters_2n.n);
 
     GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
     GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
@@ -479,12 +683,13 @@ int main(int argc, char* argv[]) {
 
     // 配置INTT参数--------------------------------------------------------
     ntt_rns_configuration<TestDataType> cfg_intt = {
-    .n_power = LOGN + 1,
-    .ntt_type = INVERSE,
-    .reduction_poly = ReductionPolynomial::X_N_minus,
-    .zero_padding = false,
-    .mod_inverse = test_ninverse,
-    .stream = 0};
+        .n_power = LOGN + 1,
+        .ntt_type = INVERSE,
+        .reduction_poly = ReductionPolynomial::X_N_minus,
+        .zero_padding = false,
+        .mod_inverse = test_ninverse,
+        .stream = 0
+    };
     
     // 执行GPU_INTT( ntt_result_device )--------------------------------------------------------
     // 在INTT操作添加计时
@@ -506,6 +711,7 @@ int main(int argc, char* argv[]) {
 
     TestDataType* result_merged_device;
     GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
+    #pragma unroll
     for(int i = 0; i < BATCH; i++)
     {
         TestDataType* result_i_0 = result_device + i * parameters_2n.n;                     // 表示 result[i][0]

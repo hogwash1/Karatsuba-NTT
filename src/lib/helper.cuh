@@ -153,3 +153,57 @@ static void PointwiseSubtract(
     cudaDeviceSynchronize();
     cudaGetLastError();
 }
+
+// Karatsuba核函数
+template <typename T>
+__global__ void karatsuba_kernel(
+    const T* __restrict__ fi,
+    const T* __restrict__ fj,
+    const T* __restrict__ gi,
+    const T* __restrict__ gj,
+    const T* __restrict__ fg_i,
+    const T* __restrict__ fg_j,
+          T*       output,
+    Modulus<T> modulus,
+    int size) 
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+
+    // 读全局
+    auto a = fi[idx], b = fj[idx], c = gi[idx], d = gj[idx], e = fg_i[idx], f = fg_j[idx];
+    // (fi+fj)*(gi+gj) - fi*gi - fj*gj
+    T sum_f = OPERATOR_GPU<T>::add(a, b, modulus);
+    T sum_g = OPERATOR_GPU<T>::add(c, d, modulus);
+    T Karatsuba_prod = OPERATOR_GPU<T>::mult(sum_f, sum_g, modulus);
+    Karatsuba_prod = OPERATOR_GPU<T>::sub(Karatsuba_prod, e, modulus);
+    Karatsuba_prod = OPERATOR_GPU<T>::sub(Karatsuba_prod, f, modulus);
+    output[idx] = OPERATOR_GPU<T>::add(output[idx], Karatsuba_prod, modulus);
+}
+
+// Karatsuba
+template <typename T>  
+static void karatsuba(
+    const T* __restrict__ fi,
+    const T* __restrict__ fj,
+    const T* __restrict__ gi,
+    const T* __restrict__ gj,
+    const T* __restrict__ fg_i,
+    const T* __restrict__ fg_j,
+          T*       output,
+    Modulus<T> modulus,
+    int n,
+    cudaStream_t stream = 0)
+{
+    constexpr int blockSize = 256;
+    const int gridSize = (n + blockSize - 1) / blockSize;
+    karatsuba_kernel<T><<<gridSize, blockSize, 0, stream>>>(
+        fi, fj, gi, gj, fg_i, fg_j, output, modulus, n);
+    
+    // 错误检查
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "karatsuba_step kernel launch failed: %s\n",
+                cudaGetErrorString(err));
+    }
+}
