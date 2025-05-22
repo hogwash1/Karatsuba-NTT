@@ -583,39 +583,40 @@ int main(int argc, char* argv[]) {
     GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device1, parameters_2n.n * sizeof(TestDataType)));   // 暂存计算中间项
     GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device2, parameters_2n.n * sizeof(TestDataType)));
     GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device1_2, parameters_2n.n * sizeof(TestDataType)));
-    #pragma unroll
-    for(int i = 0; i < BATCH; i++)
-    {
-        #pragma unroll
-        for(int j = i + 1; j < BATCH; j++)
-        {
-            // TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
-            // TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
-            // PointwiseAdd(fi, fj, tmp_device1, parameters_2n.modulus, parameters_2n.n);    // fi + fj
-            // TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
-            // TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
-            // PointwiseAdd(gi, gj, tmp_device2, parameters_2n.modulus, parameters_2n.n);    // gi + gj
-            // PointwiseMultiply(tmp_device1, tmp_device2, tmp_device1_2, parameters_2n.modulus, parameters_2n.n);    // (fi + fj) * (gi + gj)
-            // TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
-            // TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
-            // PointwiseSubtract(tmp_device1_2, diag_term_i, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi
-            // PointwiseSubtract(tmp_device1_2, diag_term_j, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi - fj * gj
-            // TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
-            // PointwiseAdd(other_term_device_i_j, tmp_device1_2, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n); 
+    // #pragma unroll
+    // for(int i = 0; i < BATCH; i++)
+    // {
+    //     #pragma unroll
+    //     for(int j = i + 1; j < BATCH; j++)
+    //     {
+    //         // TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
+    //         // TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
+    //         // PointwiseAdd(fi, fj, tmp_device1, parameters_2n.modulus, parameters_2n.n);    // fi + fj
+    //         // TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
+    //         // TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
+    //         // PointwiseAdd(gi, gj, tmp_device2, parameters_2n.modulus, parameters_2n.n);    // gi + gj
+    //         // PointwiseMultiply(tmp_device1, tmp_device2, tmp_device1_2, parameters_2n.modulus, parameters_2n.n);    // (fi + fj) * (gi + gj)
+    //         // TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
+    //         // TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
+    //         // PointwiseSubtract(tmp_device1_2, diag_term_i, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi
+    //         // PointwiseSubtract(tmp_device1_2, diag_term_j, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi - fj * gj
+    //         // TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
+    //         // PointwiseAdd(other_term_device_i_j, tmp_device1_2, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n); 
             
             
-            TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
-            TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
-            TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
-            TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
-            TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
-            TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
-            TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
-            karatsuba(fi, fj, gi, gj, diag_term_i, diag_term_j, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n);
+    //         TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
+    //         TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
+    //         TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
+    //         TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
+    //         TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
+    //         TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
+    //         TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
+    //         karatsuba(fi, fj, gi, gj, diag_term_i, diag_term_j, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n);
 
 
-        }
-    }
+    //     }
+    // }
+    karatsuba(InOut_Datas, InOut_Datas2, diag_term_device, other_term_device, parameters_2n.modulus, parameters_2n.n, BATCH);
 
     GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
     GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
@@ -708,20 +709,23 @@ int main(int argc, char* argv[]) {
     // 合并结果
     // 在结果合并添加计时
     GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
-
     TestDataType* result_merged_device;
     GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
-    #pragma unroll
-    for(int i = 0; i < BATCH; i++)
-    {
-        TestDataType* result_i_0 = result_device + i * parameters_2n.n;                     // 表示 result[i][0]
-        TestDataType* result_i_1 = result_device + ((i == 0) ? 
-            (BATCH-1)*parameters_2n.n :             // 表示 result[BATCH-1][1]
-            (i-1)*parameters_2n.n) + parameters.n;  // 表示 result[i-1][1]
-        TestDataType* result_merged_i = result_merged_device + i * parameters.n;            // 表示 result_merged[i]
-        // result_merged[i] = result[i][0] + result[i-1][1]
-        PointwiseAdd(result_i_0 , result_i_1, result_merged_i, parameters_2n.modulus, parameters.n);    //使用parameters_2n.modulus
-    }
+    // #pragma unroll
+    // for(int i = 0; i < BATCH; i++)
+    // {
+    //     TestDataType* result_i_0 = result_device + i * parameters_2n.n;                     // 表示 result[i][0]
+    //     TestDataType* result_i_1 = result_device + ((i == 0) ? 
+    //         (BATCH-1)*parameters_2n.n :             // 表示 result[BATCH-1][1]
+    //         (i-1)*parameters_2n.n) + parameters.n;  // 表示 result[i-1][1]
+    //     TestDataType* result_merged_i = result_merged_device + i * parameters.n;            // 表示 result_merged[i]
+    //     // result_merged[i] = result[i][0] + result[i-1][1]
+    //     PointwiseAdd(result_i_0 , result_i_1, result_merged_i, parameters_2n.modulus, parameters.n);    //使用parameters_2n.modulus
+    // }
+    merge(result_device, result_merged_device, parameters_2n.modulus, parameters.n, BATCH);
+
+    
+
 
     GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
     GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
