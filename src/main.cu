@@ -12,7 +12,7 @@ using namespace gpuntt;  // 使用 GPU-NTT 库的命名空间
 // 全局参数声明
 int LOGN;   // NTT变换的log2长度（实际长度N=2^LOGN）
 int BATCH;  // 批量处理的多项式数量
-
+int alpha;  
 // 选择测试数据类型（64位版本）
 typedef Data64 TestDataType;  // 定义用于测试的数据类型（32/64位可切换）
 
@@ -48,14 +48,16 @@ int main(int argc, char* argv[]) {
     // 处理命令行参数
     if (argc < 3) {  // 默认参数
         LOGN = 12;    // 2^12 = 4096点NTT
-        BATCH = 1;    // 默认处理1个多项式
+        // BATCH = 1;    // 默认处理1个多项式
+        alpha = 1;
     } else {          // 从命令行读取参数
         LOGN = atoi(argv[1]);  // 第一个参数为LOGN
-        BATCH = atoi(argv[2]); // 第二个参数为BATCH
+        // BATCH = atoi(argv[2]); // 第二个参数为BATCH
+        alpha = atoi(argv[2]);
     }
-    int alpha = 3;
+    // int alpha = 3;
     BATCH = 1 << alpha;
-    // BATCH = 3;
+
     cout << "LOGN = " << LOGN << ", BATCH = " << BATCH << endl;
 
     // 初始化NTT参数
@@ -89,15 +91,15 @@ int main(int argc, char* argv[]) {
             input1[j].push_back(dis(gen));  // 生成[0, modulus-1]范围内的随机数
             // input1[j].push_back(0);
             input2[j].push_back(dis(gen));
-            // input2[j].push_back(0);
+            // input2[j].push_back(2);
         }
         print_array(input1[j].data(), "input1[" + std::to_string(j) + "]");
         print_array(input2[j].data(), "input2[" + std::to_string(j) + "]");
     }
     // input1[0][0] = 1;input1[0][1] = 2;input1[0][parameters.n-1] = 3; input1[1][0] = 4;
     // input2[0][0] = 1;input2[0][1] = 1;input2[0][2] = 1;              input2[1][0] = 1;
-
-     // 合并输入验证
+    // input2[0][0] = 1;
+    // 合并输入验证
     cout << endl << "合并输入验证 merge(input1), merge(input2)" << endl;
     vector<TestDataType> merged_input1, merged_input2;
     for (const auto &part : input1)
@@ -116,15 +118,26 @@ int main(int argc, char* argv[]) {
     // parameters_merged.modulus.value = 268460033;
     // cout << "merged模数 = " << parameters_merged.modulus.value << endl;
     cout << endl << "INTT( NTT(merged_input1) * NTT(merged_input2) ) " << endl;
+
+    // 添加计时器
+    auto cpu_ntt_start = chrono::high_resolution_clock::now(); // 开始计时
+
     NTTCPU<TestDataType> generator_merged(parameters_merged);
     vector<TestDataType> merged_ntt_result1 = generator_merged.ntt(merged_input1);
     vector<TestDataType> merged_ntt_result2 = generator_merged.ntt(merged_input2); 
     vector<TestDataType> merged_ntt_result = generator_merged.mult(merged_ntt_result1, merged_ntt_result2);
     vector<TestDataType> intt_merged_ntt_result = generator_merged.intt(merged_ntt_result);
     print_array(intt_merged_ntt_result.data(), "intt_merged_ntt_result");
+
+    auto cpu_ntt_end = chrono::high_resolution_clock::now(); // 结束计时
+    chrono::duration<double, milli> cpu_ntt_duration = cpu_ntt_end - cpu_ntt_start;
+
     // cout << "merged_input1[n-1]:" << merged_input1[parameters.n-1] << endl;
     // 执行schoolbook乘法
     cout << endl << "schoolbook_poly_multiplication( merged_input1, merged_input2 )" << endl;
+
+    // 添加计时器
+    auto schoolbook_mult_start = chrono::high_resolution_clock::now(); // 开始计时
     vector<TestDataType> merged_schoolbook_result = schoolbook_poly_multiplication<TestDataType>(
     merged_input1, 
     merged_input2,
@@ -133,6 +146,9 @@ int main(int argc, char* argv[]) {
     );
     print_array(merged_schoolbook_result.data(), "merged_schoolbook_result");
 
+    auto schoolbook_mult_end = chrono::high_resolution_clock::now(); // 结束计时
+    chrono::duration<double, milli> schoolbook_mult_duration = schoolbook_mult_end - schoolbook_mult_start;
+   
 
 
     // 给每个多项式补0
@@ -228,10 +244,12 @@ int main(int argc, char* argv[]) {
 
 
    
-    
+    cout << endl << "LOGN = " << LOGN << ", " << "alpha = " << alpha << ", " 
+    << "BATCH = " << BATCH << " , " << "LOGN + alpha = " << LOGN + alpha << endl;
+    cout << "CPU NTT总耗时: " << cpu_ntt_duration.count() << " ms" << endl;
+    cout << "Schoolbook multiplication 总耗时: " << schoolbook_mult_duration.count() << " ms" << endl;
 
 
-    
 
 
 
@@ -545,17 +563,30 @@ int main(int argc, char* argv[]) {
     // 在点乘操作添加计时
     GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
 
-    TestDataType* diag_term_device;
-    GPUNTT_CUDA_CHECK(cudaMalloc(&diag_term_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
+    // TestDataType* diag_term_device;
+    // GPUNTT_CUDA_CHECK(cudaMalloc(&diag_term_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
+
+
+        TestDataType* diag_term_device; // GPU端对角项指针
+        GPUNTT_CUDA_CHECK(cudaMalloc(&diag_term_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
+        TestDataType* other_term_device; // GPU端非对角项指针
+        GPUNTT_CUDA_CHECK(cudaMalloc(&other_term_device, 2 * BATCH * parameters_2n.n * sizeof(TestDataType)));
+        TestDataType* ntt_result_device; // GPU端NTT结果指针
+        GPUNTT_CUDA_CHECK(cudaMalloc(&ntt_result_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
+        GPUNTT_CUDA_CHECK(cudaMemset(ntt_result_device, 0, BATCH * parameters_2n.n * sizeof(TestDataType)));
+        TestDataType* result_device; // GPU端结果指针
+        GPUNTT_CUDA_CHECK(cudaMalloc(&result_device, BATCH * parameters_2n.n * sizeof(TestDataType))); 
+        TestDataType* result_merged_device; // GPU端结果内部折叠指针
+        GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
         PointwiseMultiply<TestDataType>(
-        InOut_Datas,                      // 第一个多项式地址
-        InOut_Datas2,                     // 第二个多项式地址
-        diag_term_device,                 // 输出地址
-        parameters_2n.modulus,               // 模数参数
-        BATCH * parameters_2n.n,             // 多项式长度
-        1,                                // 批量数
-        0                                 // 使用默认流
-    );
+            InOut_Datas,                      // 第一个多项式地址
+            InOut_Datas2,                     // 第二个多项式地址
+            diag_term_device,                 // 输出地址
+            parameters_2n.modulus,               // 模数参数
+            BATCH * parameters_2n.n,             // 多项式长度
+            1,                                // 批量数
+            0                                 // 使用默认流
+        );
 
     GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
     GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
@@ -577,86 +608,29 @@ int main(int argc, char* argv[]) {
     // 在其它项计算添加计时
     GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
 
-    TestDataType* other_term_device,  *tmp_device1, *tmp_device2, *tmp_device1_2;
-    GPUNTT_CUDA_CHECK(cudaMalloc(&other_term_device, 2 * BATCH * parameters_2n.n * sizeof(TestDataType)));
-    GPUNTT_CUDA_CHECK(cudaMemset(other_term_device, 0, 2 * BATCH * parameters_2n.n * sizeof(TestDataType))); // 关键初始化
-    GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device1, parameters_2n.n * sizeof(TestDataType)));   // 暂存计算中间项
-    GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device2, parameters_2n.n * sizeof(TestDataType)));
-    GPUNTT_CUDA_CHECK(cudaMalloc(&tmp_device1_2, parameters_2n.n * sizeof(TestDataType)));
-    // #pragma unroll
-    // for(int i = 0; i < BATCH; i++)
-    // {
-    //     #pragma unroll
-    //     for(int j = i + 1; j < BATCH; j++)
-    //     {
-    //         // TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
-    //         // TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
-    //         // PointwiseAdd(fi, fj, tmp_device1, parameters_2n.modulus, parameters_2n.n);    // fi + fj
-    //         // TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
-    //         // TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
-    //         // PointwiseAdd(gi, gj, tmp_device2, parameters_2n.modulus, parameters_2n.n);    // gi + gj
-    //         // PointwiseMultiply(tmp_device1, tmp_device2, tmp_device1_2, parameters_2n.modulus, parameters_2n.n);    // (fi + fj) * (gi + gj)
-    //         // TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
-    //         // TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
-    //         // PointwiseSubtract(tmp_device1_2, diag_term_i, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi
-    //         // PointwiseSubtract(tmp_device1_2, diag_term_j, tmp_device1_2, parameters_2n.modulus, parameters_2n.n); // (fi + fj) * (gi + gj) - fi * gi - fj * gj
-    //         // TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
-    //         // PointwiseAdd(other_term_device_i_j, tmp_device1_2, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n); 
-            
-            
-    //         TestDataType* fi = InOut_Datas + i * parameters_2n.n;      // 表示fi
-    //         TestDataType* fj = InOut_Datas + j * parameters_2n.n;      // 表示fj
-    //         TestDataType* gi = InOut_Datas2 + i * parameters_2n.n;     // 表示gi
-    //         TestDataType* gj = InOut_Datas2 + j * parameters_2n.n;     // 表示gj
-    //         TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;    // 表示 fi * gi
-    //         TestDataType* diag_term_j = diag_term_device + j * parameters_2n.n;    // 表示 fj * gj
-    //         TestDataType* other_term_device_i_j = other_term_device + ((i+j) * parameters_2n.n);
-    //         karatsuba(fi, fj, gi, gj, diag_term_i, diag_term_j, other_term_device_i_j, parameters_2n.modulus, parameters_2n.n);
-
-
-    //     }
-    // }
     karatsuba(InOut_Datas, InOut_Datas2, diag_term_device, other_term_device, parameters_2n.modulus, parameters_2n.n, BATCH);
-
+    merge_diag_non_diag(diag_term_device, other_term_device, other_term_device, parameters_2n.modulus, parameters_2n.n, BATCH);
+    
     GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
     GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
     GPUNTT_CUDA_CHECK(cudaEventElapsedTime(&elapsedTime, start, stop));
     std::cout << "非对角项计算耗时: " << elapsedTime << " ms" << std::endl;
     totalElapsedTime += elapsedTime;
 
-    GPUNTT_CUDA_CHECK(cudaGetLastError());
-    // 对角线项加上其它项
-    for(int i = 0; i < BATCH; i++)
-    {
-        //  diagonal_term[i] + other_term[2i];
-        TestDataType* other_term_2i = other_term_device + 2 * i * parameters_2n.n;  // 表示 other_term[2i]
-        TestDataType* diag_term_i = diag_term_device + i * parameters_2n.n;         // 表示 diagonal_term[i]
-        PointwiseAdd(other_term_2i, diag_term_i, other_term_2i, parameters_2n.modulus, parameters_2n.n);    // 表示 other_term[2i] = other_term[2i] + diagonal_term[i]
-    }
+    // GPUNTT_CUDA_CHECK(cudaGetLastError());
+    
+
+
     // 验证other_term计算结果
     TestDataType* host_other_term = (TestDataType*)malloc(2*BATCH*parameters_2n.n*sizeof(TestDataType));
     GPUNTT_CUDA_CHECK(cudaMemcpy(host_other_term, other_term_device, 
                             2*BATCH*parameters_2n.n*sizeof(TestDataType),
                             cudaMemcpyDeviceToHost));
-    // print_array(host_other_term, "GPU 计算其它项结果");
     VERIFY_RESULTS(host_other_term, other_term, "GPU计算其它项结果正确");
 
     // 合并结果
     // 在结果合并添加计时
     GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
-
-    TestDataType* ntt_result_device;
-    GPUNTT_CUDA_CHECK(cudaMalloc(&ntt_result_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
-    GPUNTT_CUDA_CHECK(cudaMemset(ntt_result_device, 0, BATCH * parameters_2n.n * sizeof(TestDataType)));
-    // #pragma unroll
-    // for(int i = 0; i < BATCH; i++)
-    // {
-    //     // other_term[i] + other_term[i + BATCH] 
-    //     TestDataType* other_term_i = other_term_device + i * parameters_2n.n;
-    //     TestDataType* other_term_i_BATCH = other_term_device + (i + BATCH) * parameters_2n.n;
-    //     TestDataType* ntt_result_i = ntt_result_device + i * parameters_2n.n;
-    //     PointwiseAdd(other_term_i, other_term_i_BATCH, ntt_result_i, parameters_2n.modulus, parameters_2n.n);
-    // }
     PointwiseAdd(other_term_device, other_term_device + (BATCH * parameters_2n.n), ntt_result_device, parameters_2n.modulus, BATCH * parameters_2n.n);
 
     GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
@@ -696,8 +670,8 @@ int main(int argc, char* argv[]) {
     // 在INTT操作添加计时
     GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));  
 
-    TestDataType* result_device;
-    GPUNTT_CUDA_CHECK(cudaMalloc(&result_device, BATCH * parameters_2n.n * sizeof(TestDataType))); 
+    // TestDataType* result_device;
+    // GPUNTT_CUDA_CHECK(cudaMalloc(&result_device, BATCH * parameters_2n.n * sizeof(TestDataType))); 
     GPU_NTT(ntt_result_device, result_device, Inverse_Omega_Table_Device, test_modulus, cfg_intt, BATCH, 1);
 
     GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
@@ -709,8 +683,8 @@ int main(int argc, char* argv[]) {
     // 合并结果
     // 在结果合并添加计时
     GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
-    TestDataType* result_merged_device;
-    GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
+    // TestDataType* result_merged_device;
+    // GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
     // #pragma unroll
     // for(int i = 0; i < BATCH; i++)
     // {
