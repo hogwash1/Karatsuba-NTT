@@ -368,7 +368,7 @@ int main(int argc, char* argv[]) {
 
         GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
         // 执行乘法操作
-        PointwiseMultiply(Merge_Datas1, Merge_Datas2, Merge_Datas1, parameters_merged.modulus, parameters_merged.n);
+        PointwiseMultiply(Merge_Datas1, Merge_Datas2, Merge_Datas1, parameters_merged.modulus, parameters_merged.n, 1);
         
         GPUNTT_CUDA_CHECK(cudaEventRecord(stop, 0));
         GPUNTT_CUDA_CHECK(cudaEventSynchronize(stop));
@@ -558,26 +558,27 @@ int main(int argc, char* argv[]) {
     std::cout << "双路NTT总耗时: " << elapsedTime << " ms" << std::endl;
     totalElapsedTime += elapsedTime;
 
-    // 处理对角线项 (i = j) diagonal term
-    
-    // 在点乘操作添加计时
-    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
+
+
+    TestDataType* diag_term_device; // GPU端对角项指针
+    GPUNTT_CUDA_CHECK(cudaMalloc(&diag_term_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
+    TestDataType* other_term_device; // GPU端非对角项指针
+    GPUNTT_CUDA_CHECK(cudaMalloc(&other_term_device, 2 * BATCH * parameters_2n.n * sizeof(TestDataType)));
+    TestDataType* ntt_result_device; // GPU端NTT结果指针
+    GPUNTT_CUDA_CHECK(cudaMalloc(&ntt_result_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
+    GPUNTT_CUDA_CHECK(cudaMemset(ntt_result_device, 0, BATCH * parameters_2n.n * sizeof(TestDataType)));
+    TestDataType* result_device; // GPU端结果指针
+    GPUNTT_CUDA_CHECK(cudaMalloc(&result_device, BATCH * parameters_2n.n * sizeof(TestDataType))); 
+    TestDataType* result_merged_device; // GPU端结果内部折叠指针
+    GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
 
     // TestDataType* diag_term_device;
     // GPUNTT_CUDA_CHECK(cudaMalloc(&diag_term_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
 
+    // 处理对角线项 (i = j) diagonal term
+    // 在点乘操作添加计时
+    GPUNTT_CUDA_CHECK(cudaEventRecord(start, 0));
 
-        TestDataType* diag_term_device; // GPU端对角项指针
-        GPUNTT_CUDA_CHECK(cudaMalloc(&diag_term_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
-        TestDataType* other_term_device; // GPU端非对角项指针
-        GPUNTT_CUDA_CHECK(cudaMalloc(&other_term_device, 2 * BATCH * parameters_2n.n * sizeof(TestDataType)));
-        TestDataType* ntt_result_device; // GPU端NTT结果指针
-        GPUNTT_CUDA_CHECK(cudaMalloc(&ntt_result_device, BATCH * parameters_2n.n * sizeof(TestDataType)));
-        GPUNTT_CUDA_CHECK(cudaMemset(ntt_result_device, 0, BATCH * parameters_2n.n * sizeof(TestDataType)));
-        TestDataType* result_device; // GPU端结果指针
-        GPUNTT_CUDA_CHECK(cudaMalloc(&result_device, BATCH * parameters_2n.n * sizeof(TestDataType))); 
-        TestDataType* result_merged_device; // GPU端结果内部折叠指针
-        GPUNTT_CUDA_CHECK(cudaMalloc(&result_merged_device, BATCH * parameters.n * sizeof(TestDataType)));
         PointwiseMultiply<TestDataType>(
             InOut_Datas,                      // 第一个多项式地址
             InOut_Datas2,                     // 第二个多项式地址

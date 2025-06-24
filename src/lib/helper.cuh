@@ -44,10 +44,27 @@ __global__ void PointwiseMultiplyKernel(
     Modulus<T> modulus, 
     int size)
 {
+    // extern __shared__ char shared_memory_typed[];
+    // T* shared_mem = reinterpret_cast<T*>(shared_memory_typed);
+
+    // const int tid = threadIdx.x;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // const int i = blockIdx.y;
+
+    // if(i >= gridDim.y || idx >= size) return;
+
+    // T *f_ = shared_mem,  *g_ = shared_mem + blockDim.x;
+    // if(tid < blockDim.x) {  // 确保不越界
+    //     f_[tid] = input1[i * size + idx];
+    //     g_[tid] = input2[i * size + idx];
+    // }
+    //  __syncthreads();
+
     if(idx < size) {
         output[idx] = OPERATOR_GPU<T>::mult(input1[idx], input2[idx], modulus);
     }
+    // output[i * size + idx] = OPERATOR_GPU<T>::mult(input1[i * size + idx], input2[i * size + idx], modulus);
+
 }
 
 // 点乘方法
@@ -64,7 +81,7 @@ static void PointwiseMultiply(
     
     constexpr int blockSize = 256;
     const int gridSize = (n + blockSize - 1) / blockSize;
-
+    // size_t shared_size = 2 * blockSize * sizeof(T);
         PointwiseMultiplyKernel<<<gridSize, blockSize, 0, stream>>>(
             device_in1, 
             device_in2, 
@@ -72,8 +89,12 @@ static void PointwiseMultiply(
             modulus, 
             n
         );
-    cudaDeviceSynchronize();
-    cudaGetLastError();
+        // 错误检查
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "pointwiseMult kernel launch failed: %s\n",
+                cudaGetErrorString(err));
+    }
 }
 
 // 点积加法核函数
@@ -85,10 +106,18 @@ __global__ void PointwiseAddKernel(
     Modulus<T> modulus, 
     int size)
 {
+    // extern __shared__ char shared_memory_typed[];
+    // T* shared_mem = reinterpret_cast<T*>(shared_memory_typed);
+    
+    // const int tid = threadIdx.x;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if(idx < size) {
-        output[idx] = OPERATOR_GPU<T>::add(input1[idx], input2[idx], modulus);
-    }
+
+    // T *f_ = shared_mem,  *g_ = shared_mem + blockDim.x;
+    // f_[tid] = input1[idx],  g_[tid] = input2[idx];
+    //  __syncthreads();
+    if( idx >= size)  return;
+    output[idx] = OPERATOR_GPU<T>::add(input1[idx], input2[idx], modulus);
+
 }
 
 // 点积减法核函数
@@ -119,7 +148,7 @@ static void PointwiseAdd(
 {
     constexpr int blockSize = 256;
     const int gridSize = (n + blockSize - 1) / blockSize;
-    
+    // size_t shared_size = 2 * blockSize * sizeof(T);
     PointwiseAddKernel<<<gridSize, blockSize, 0, stream>>>(
         device_in1, 
         device_in2, 
@@ -127,8 +156,7 @@ static void PointwiseAdd(
         modulus,
         n
     );
-    cudaDeviceSynchronize();
-    cudaGetLastError();
+
 }
 
 // 点减方法
@@ -152,8 +180,7 @@ static void PointwiseSubtract(
         modulus,
         n
     );
-    cudaDeviceSynchronize();
-    cudaGetLastError();
+
 }
 
 // // Karatsuba核函数
@@ -272,46 +299,35 @@ template <typename T>
 __global__ void karatsuba_kernel(
     const T* __restrict__ input1,
     const T* __restrict__ input2,
-    const T* __restrict__ input3,
-          T*              output,
+    T*  input3,
+    T*  output,
     Modulus<T> modulus,
     int size
     ) 
 {
-    // extern __shared__ char shared_memory_typed[];
-    // T* shared_mem = reinterpret_cast<T*>(shared_memory_typed);
+    extern __shared__ char shared_memory_typed[];
+    T* shared_mem = reinterpret_cast<T*>(shared_memory_typed);
 
-    // const int tid = threadIdx.x;
+    const int tid = threadIdx.x;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y;
     int batch = gridDim.y;
 
-    // if (idx >= size) return;
+    if (idx >= size) return;
+    T*  f_ = shared_mem,  * g_ = shared_mem + blockDim.x,  * fg_ = shared_mem + 2 * blockDim.x;
+    f_[tid] = input1[i * size + idx], g_[tid] = input2[i * size + idx], fg_[tid] = input3[i * size + idx];
 
+     __syncthreads();
     // 每个block处理一个i值的计算
     if(idx >= size || i >= batch) return;
 
+    T a = f_[tid], 
+      c = g_[tid], 
+      e = fg_[tid];
 
-    {
-        // // 共享内存布局:
-        // // [0, size-1] : 当前i的input1 (a)
-        // // [size, 2*size-1] : 当前i的input2 (c)
-        // // [2*size, 3*size-1] : 当前i的input3 (e)
-        // T* a_shared = shared_mem;
-        // T* c_shared = shared_mem + size;
-        // T* e_shared = shared_mem + 2 * size;
-        // a_shared[tid] = input1[i * size + idx];
-        // c_shared[tid] = input2[i * size + idx];
-        // e_shared[tid] = input3[i * size + idx];
-        // __syncthreads();
-        // T a = a_shared[tid];
-        // T c = c_shared[tid];
-        // T e = e_shared[tid];
-    }
-
-    T a = input1[i * size + idx], 
-      c = input2[i * size + idx], 
-      e = input3[i * size + idx];
+    // T a = input1[i * size + idx], 
+    //   c = input2[i * size + idx], 
+    //   e = input3[i * size + idx];
     
     for  (int j = i+1; j < batch; j++) 
     { 
@@ -344,8 +360,8 @@ template <typename T>
 static void karatsuba(
     const T* __restrict__ input1,
     const T* __restrict__ input2,
-    const T* __restrict__ input3,
-          T*              output,
+    T*  input3,
+    T*  output,
     Modulus<T> modulus,
     int n,
     int batch,
@@ -354,8 +370,8 @@ static void karatsuba(
     constexpr int blockSize = 256;
     dim3 grid((n + blockSize - 1) / blockSize, batch);  // 二维网格
 
-    // size_t shared_size = 3 * n * sizeof(T);  // 仅需存储3个size长度的数组
-    karatsuba_kernel<T><<<grid, blockSize, 0, stream>>>(input1, input2, input3, output, modulus, n);
+    size_t shared_size = 3 * blockSize * sizeof(T);  // 仅需存储3个size长度的数组
+    karatsuba_kernel<T><<<grid, blockSize, shared_size, stream>>>(input1, input2, input3, output, modulus, n);
     // 错误检查
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
