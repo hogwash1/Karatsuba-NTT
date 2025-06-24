@@ -2,7 +2,7 @@
 
 
 ### 前置条件
-- CMake >=3.2
+- CMake >=3.26
 - GCC
 - CUDA Toolkit
 
