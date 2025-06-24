@@ -2,6 +2,7 @@
 
 
 ### 前置条件
+- GPU-NTT库
 - CMake >=3.26
 - GCC
 - CUDA Toolkit
